@@ -1,0 +1,9 @@
+data
+.venv
+*.__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+fast_neural_style_inspiration_only
