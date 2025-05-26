@@ -23,10 +23,16 @@ class TransformerNet(torch.nn.Module):
         self.deconv2 = UpsampleConvLayer(64, 32, kernel_size=3, stride=1, upsample=2)
         self.in5 = torch.nn.InstanceNorm2d(32, affine=True)
         self.deconv3 = ConvLayer(32, 3, kernel_size=9, stride=1)
+        # Color preservation layers
+        self.color_conv = ConvLayer(3, 3, kernel_size=1, stride=1)
+        self.color_scale = torch.nn.Parameter(torch.ones(1) * 0.05)  # Learnable color preservation weight
         # Non-linearities
         self.relu = torch.nn.ReLU()
 
     def forward(self, X):
+        # Store input for color preservation
+        color_info = self.color_conv(X)
+        
         y = self.relu(self.in1(self.conv1(X)))
         y = self.relu(self.in2(self.conv2(y)))
         y = self.relu(self.in3(self.conv3(y)))
@@ -38,6 +44,14 @@ class TransformerNet(torch.nn.Module):
         y = self.relu(self.in4(self.deconv1(y)))
         y = self.relu(self.in5(self.deconv2(y)))
         y = self.deconv3(y)
+        
+        # Adaptive color preservation
+        # Use the learned scale factor and apply it only to preserve local color relationships
+        color_scale = torch.sigmoid(self.color_scale)  # Ensure scale is between 0 and 1
+        y = y + color_scale * (color_info - y)  # Preserve local color relationships
+        
+        # Use sigmoid activation to ensure output is in [0,1] range
+        y = torch.sigmoid(y)
         return y
 
 

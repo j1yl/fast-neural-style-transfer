@@ -6,12 +6,17 @@ from pathlib import Path
 import argparse
 from tqdm import tqdm
 import os
-import time
 from typing import Optional
 
 from transformer import TransformerNet
 from vgg import Vgg16
-from utils import load_image, save_image, show_images, get_device, create_output_dir, normalize_batch, gram_matrix,setup_experiment_dir, save_training_config, save_loss_plot, save_training_summary, save_stylized_results
+from utils import (
+    load_image, save_image, show_images, get_device, create_output_dir,
+    normalize_batch, gram_matrix, setup_experiment_dir, save_training_config,
+    save_loss_plot, save_training_summary, save_stylized_results,
+    preserve_color_characteristics, debug_color_values, debug_normalize_batch,
+    debug_image_values
+)
 
 class ImageDataset(Dataset):
     def __init__(self, content_dir: str, size: Optional[int] = None, force_size: bool = False, transform=None):
@@ -42,8 +47,8 @@ def train(args):
     # Save training configuration
     save_training_config(args, exp_dir)
     
-    # Load style image (force 76x76 for emoji style)
-    style = load_image(args.style_image, size=76, force_size=True).to(device)
+    # Load style image (force 72x72 for emoji style)
+    style = load_image(args.style_image, size=72, force_size=True).to(device)
     
     # Initialize models
     transformer = TransformerNet().to(device)
@@ -68,6 +73,7 @@ def train(args):
     losses = {
         'content': [],
         'style': [],
+        'color': [],
         'total': []
     }
     
@@ -76,6 +82,7 @@ def train(args):
         transformer.train()
         agg_content_loss = 0.
         agg_style_loss = 0.
+        agg_color_loss = 0.
         count = 0
         
         with tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.epochs}') as pbar:
@@ -87,39 +94,64 @@ def train(args):
                 x = x.to(device)
                 y = transformer(x)
                 
-                # Add brightness preservation loss
-                brightness_loss = mse_loss(y.mean(), x.mean())
+                # Debug color values at key points
+                debug_color_values(x, "Input content image", exp_dir)
+                debug_color_values(y, "Transformer output", exp_dir)
                 
-                y = normalize_batch(y)
-                x = normalize_batch(x)
+                # Use debug version of normalize_batch
+                y = debug_normalize_batch(y)
+                x = debug_normalize_batch(x)
                 
                 features_y = vgg(y)
                 features_x = vgg(x)
                 
+                # Increase content weight to preserve more structure
                 content_loss = args.content_weight * mse_loss(features_y.relu2_2, features_x.relu2_2)
                 
                 style_loss = 0.
                 for ft_y, gm_s in zip(features_y, gram_style):
                     gm_y = gram_matrix(ft_y)
                     style_loss += mse_loss(gm_y, gm_s.expand(n_batch, -1, -1))
-                style_loss *= args.style_weight
+                style_loss *= args.style_weight * 15.0
                 
-                total_loss = content_loss + style_loss + brightness_loss
+                color_loss = preserve_color_characteristics(
+                    x, style, y,
+                    content_weight=0.7,  # Reduce content color preservation
+                    style_weight=0.3     # Increase style color influence
+                ) * 10.0  # Reduce color loss weight
+                
+                # Add a moderate brightness preservation term
+                brightness_loss = torch.mean((y.mean() - x.mean())**2) * 0.5
+                
+                # Add a moderate contrast preservation term
+                contrast_loss = torch.mean((y.std() - x.std())**2) * 0.3
+                
+                # Add a moderate direct color matching loss
+                color_matching_loss = torch.mean((y - x)**2) * 5.0
+                
+                total_loss = content_loss + style_loss + color_loss + brightness_loss + contrast_loss + color_matching_loss
                 total_loss.backward()
+                
+                # Add gradient clipping
+                torch.nn.utils.clip_grad_norm_(transformer.parameters(), max_norm=1.0)
+                
                 optimizer.step()
                 
                 # Track losses
                 losses['content'].append(content_loss.item())
                 losses['style'].append(style_loss.item())
+                losses['color'].append(color_loss.item())
                 losses['total'].append(total_loss.item())
                 
                 agg_content_loss += content_loss.item()
                 agg_style_loss += style_loss.item()
+                agg_color_loss += color_loss.item()
                 
                 pbar.set_postfix({
                     'content_loss': f'{agg_content_loss / (batch_id + 1):.4f}',
                     'style_loss': f'{agg_style_loss / (batch_id + 1):.4f}',
-                    'total_loss': f'{(agg_content_loss + agg_style_loss) / (batch_id + 1):.4f}'
+                    'color_loss': f'{agg_color_loss / (batch_id + 1):.4f}',
+                    'total_loss': f'{(agg_content_loss + agg_style_loss + agg_color_loss) / (batch_id + 1):.4f}'
                 })
                 
                 if (batch_id + 1) % args.checkpoint_interval == 0:
@@ -155,9 +187,16 @@ def test_pipeline(args):
     test_image = load_image(args.test_image).to(device)
     style_image = load_image(args.style_image).to(device)
     
+    # Debug input images
+    debug_image_values(test_image, "Input test image")
+    debug_image_values(style_image, "Input style image")
+    
     # Forward pass
     with torch.no_grad():
         output = transformer(test_image)
+    
+    # Debug output image
+    debug_image_values(output, "Transformer output")
     
     # Display results
     show_images([test_image, style_image, output], 
@@ -203,7 +242,7 @@ def test_trained_model(args, exp_dir: str):
     
     # Load a test image (use original dimensions)
     test_image = load_image(args.test_image, size=None).to(device)
-    style_image = load_image(args.style_image, size=76, force_size=True).to(device)
+    style_image = load_image(args.style_image, size=72, force_size=True).to(device)
     
     # Generate stylized image
     with torch.no_grad():
