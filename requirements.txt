@@ -29,6 +29,7 @@ nvidia-cusparselt-cu12==0.6.3
 nvidia-nccl-cu12==2.26.2
 nvidia-nvjitlink-cu12==12.6.85
 nvidia-nvtx-cu12==12.6.77
+opencv-python==4.11.0.86
 packaging==25.0
 pillow==11.2.1
 protobuf==6.31.0
@@ -36,6 +37,8 @@ pyparsing==3.2.3
 python-dateutil==2.9.0.post0
 python-slugify==8.0.4
 requests==2.32.3
+scipy==1.15.3
+setuptools==80.8.0
 six==1.17.0
 sympy==1.14.0
 text-unidecode==1.3
