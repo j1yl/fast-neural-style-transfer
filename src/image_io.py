@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import Optional, Dict
 import json
 
-_already_reported_resize = set()
+_resized_count = 0
+_total_count = 0
 
 
 def load_image(
@@ -15,7 +16,9 @@ def load_image(
     force_size: bool = True,
     output_size: Optional[int] = None,
 ) -> torch.Tensor:
-    global _already_reported_resize
+    global _resized_count, _total_count
+    _total_count += 1
+    
     image = Image.open(image_path)
     if image.mode != "RGBA":
         image = image.convert("RGBA")
@@ -23,16 +26,12 @@ def load_image(
     image = Image.alpha_composite(background, image)
     image = image.convert("RGB")
     orig_size = image.size
+    
     if size is not None:
-        if force_size:
-            if (
-                image.size != (size, size)
-                and image_path not in _already_reported_resize
-            ):
-                print(
-                    f"[INFO] Resizing {image_path} from {orig_size} to {size}x{size} for VGG16 compatibility."
-                )
-                _already_reported_resize.add(image_path)
+        if force_size and image.size != (size, size):
+            _resized_count += 1
+            if _total_count % 500 == 0:  # Print summary every 500 images
+                print(f"[INFO] Resized {_resized_count}/{_total_count} images to {size}x{size} for VGG16 compatibility")
             transform = transforms.Compose(
                 [transforms.Resize((size, size)), transforms.ToTensor()]
             )
@@ -44,19 +43,16 @@ def load_image(
             else:
                 new_w = size
                 new_h = int(h * size / w)
-            if (
-                new_w,
-                new_h,
-            ) != image.size and image_path not in _already_reported_resize:
-                print(
-                    f"[INFO] Resizing {image_path} from {orig_size} to {new_w}x{new_h} for VGG16 compatibility."
-                )
-                _already_reported_resize.add(image_path)
+            if (new_w, new_h) != image.size:
+                _resized_count += 1
+                if _total_count % 100 == 0:  # Print summary every 100 images
+                    print(f"[INFO] Resized {_resized_count}/{_total_count} images to {size}x{size} for VGG16 compatibility")
             transform = transforms.Compose(
                 [transforms.Resize((new_h, new_w)), transforms.ToTensor()]
             )
     else:
         transform = transforms.Compose([transforms.ToTensor()])
+    
     image = transform(image)
     if len(image.shape) != 3:
         raise ValueError(

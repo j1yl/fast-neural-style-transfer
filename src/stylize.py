@@ -52,6 +52,7 @@ class ImageDataset(Dataset):
         self.transform = transform
         self.size = size
         self.force_size = force_size
+        print(f"Found {len(self.image_files)} images in {content_dir}")
 
     def __len__(self):
         return len(self.image_files)
@@ -77,8 +78,25 @@ def train(args):
     transformer = TransformerNet().to(device)
     vgg = Vgg16(requires_grad=False).to(device)
 
+    # Original dataset loading code (commented out for comparison)
+    """
     train_dataset = ImageDataset(args.dataset, size=224, force_size=True)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    """
+    
+    # Load FFHQ dataset from local directory
+    print("Loading FFHQ dataset from local directory...")
+    train_dataset = ImageDataset(
+        content_dir="data/ffhq",  # Path to your local FFHQ images
+        size=224,
+        force_size=True
+    )
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=4
+    )
 
     optimizer = optim.Adam(transformer.parameters(), args.lr)
 
@@ -98,7 +116,9 @@ def train(args):
         count = 0
 
         with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}") as pbar:
-            for batch_id, (x, _) in enumerate(pbar):
+            for batch_id, batch in enumerate(pbar):
+                # Get images from batch tuple (image, label)
+                x, _ = batch
                 n_batch = len(x)
                 count += n_batch
                 optimizer.zero_grad()
