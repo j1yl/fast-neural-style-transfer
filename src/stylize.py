@@ -162,7 +162,7 @@ def train(args):
                     transformer.to(device).train()
 
     transformer.eval().cpu()
-    save_model_filename = f"final_model.pth"
+    save_model_filename = "final_model.pth"
     save_model_path = os.path.join(exp_dir, "checkpoints", save_model_filename)
     torch.save(transformer.state_dict(), save_model_path)
 

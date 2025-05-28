@@ -1,5 +1,5 @@
 import torch
-from PIL import Image, ImageEnhance
+from PIL import Image
 import os
 from torchvision import transforms
 from datetime import datetime
@@ -25,7 +25,6 @@ def load_image(
     background = Image.new("RGBA", image.size, (255, 255, 255, 255))
     image = Image.alpha_composite(background, image)
     image = image.convert("RGB")
-    orig_size = image.size
 
     if size is not None:
         if force_size and image.size != (size, size):
