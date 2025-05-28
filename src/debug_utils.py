@@ -4,33 +4,6 @@ import numpy as np
 import json
 
 
-def debug_color_values(tensor: torch.Tensor, stage: str, exp_dir: str) -> None:
-    tensor = tensor.detach().cpu()
-    debug_output = []
-    debug_output.append(f"\nColor Debug - {stage}:")
-    debug_output.append(f"Original shape: {tensor.shape}")
-    if len(tensor.shape) == 3:
-        tensor = tensor.unsqueeze(0)
-    debug_output.append(f"Shape after batch dim: {tensor.shape}")
-    min_vals = tensor.min(dim=1)[0].min(dim=1)[0]
-    max_vals = tensor.max(dim=1)[0].max(dim=1)[0]
-    mean_vals = tensor.mean(dim=1)[0].mean(dim=1)[0]
-    avg_min = min_vals.mean(dim=0) if min_vals.dim() > 0 else min_vals
-    avg_max = max_vals.mean(dim=0) if max_vals.dim() > 0 else max_vals
-    avg_mean = mean_vals.mean(dim=0) if mean_vals.dim() > 0 else mean_vals
-    min_list = avg_min.tolist() if avg_min.dim() > 0 else [avg_min.item()]
-    max_list = avg_max.tolist() if avg_max.dim() > 0 else [avg_max.item()]
-    mean_list = avg_mean.tolist() if avg_mean.dim() > 0 else [avg_mean.item()]
-    debug_output.append(f"Average Min values (RGB): {min_list}")
-    debug_output.append(f"Average Max values (RGB): {max_list}")
-    debug_output.append(f"Average Mean values (RGB): {mean_list}")
-    debug_output.append(f"Overall mean: {tensor.mean().item():.4f}")
-    debug_output.append(f"Overall std: {tensor.std().item():.4f}")
-    debug_file = os.path.join(exp_dir, "logs", "color_debug.txt")
-    with open(debug_file, "a") as f:
-        f.write("\n".join(debug_output) + "\n")
-
-
 def debug_normalize_batch(batch, exp_dir=None):
     normalized = None
     from losses import normalize_batch

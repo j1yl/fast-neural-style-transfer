@@ -32,7 +32,6 @@ def save_loss_plot(losses: Dict[str, List[float]], exp_dir: str) -> None:
     plt.figure(figsize=(10, 6))
     plt.plot(losses["content"], label="Content Loss", color="blue")
     plt.plot(losses["style"], label="Style Loss", color="red")
-    plt.plot(losses["color"], label="Color Loss", color="green", alpha=0.5)
     plt.plot(
         losses["total"], label="Total Loss", color="black", linestyle="--", alpha=0.7
     )
