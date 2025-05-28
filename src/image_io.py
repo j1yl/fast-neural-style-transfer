@@ -30,8 +30,8 @@ def load_image(
     if size is not None:
         if force_size and image.size != (size, size):
             _resized_count += 1
-            if _total_count % 500 == 0:  # Print summary every 500 images
-                print(f"[INFO] Resized {_resized_count}/{_total_count} images to {size}x{size} for VGG16 compatibility")
+            # if _total_count % 500 == 0:  # Print summary every 500 images
+            #     print(f"[INFO] Resized {_resized_count}/{_total_count} images to {size}x{size} for VGG16 compatibility")
             transform = transforms.Compose(
                 [transforms.Resize((size, size)), transforms.ToTensor()]
             )
@@ -45,8 +45,8 @@ def load_image(
                 new_h = int(h * size / w)
             if (new_w, new_h) != image.size:
                 _resized_count += 1
-                if _total_count % 100 == 0:  # Print summary every 100 images
-                    print(f"[INFO] Resized {_resized_count}/{_total_count} images to {size}x{size} for VGG16 compatibility")
+                # if _total_count % 100 == 0:  # Print summary every 100 images
+                #     print(f"[INFO] Resized {_resized_count}/{_total_count} images to {size}x{size} for VGG16 compatibility")
             transform = transforms.Compose(
                 [transforms.Resize((new_h, new_w)), transforms.ToTensor()]
             )
@@ -65,7 +65,7 @@ def load_image(
         image = torch.nn.functional.interpolate(
             image, size=(output_size, output_size), mode="bilinear", align_corners=False
         )
-        print(f"[INFO] Resized image to {output_size}x{output_size} for output.")
+        # print(f"[INFO] Resized image to {output_size}x{output_size} for output.")
     return image
 
 
