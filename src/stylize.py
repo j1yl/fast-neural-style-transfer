@@ -28,7 +28,16 @@ from debug_utils import debug_image_values
 from config import (
     CONTENT_WEIGHT,
     STYLE_WEIGHT,
+    FACE_DETECTION_ENABLED,
+    FACE_PREDICTOR_PATH,
 )
+from face_utils import (
+    create_face_mask,
+    calculate_adaptive_weights,
+    compute_style_loss,
+)
+import cv2
+import numpy as np
 
 
 class ImageDataset(Dataset):
@@ -71,12 +80,6 @@ def train(args):
 
     transformer = TransformerNet().to(device)
     vgg = Vgg16(requires_grad=False).to(device)
-
-    # Original dataset loading code (commented out for comparison)
-    """
-    train_dataset = ImageDataset(args.dataset, size=224, force_size=True)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    """
 
     # Load FFHQ dataset from local directory
     print("Loading FFHQ dataset from local directory...")
@@ -123,11 +126,22 @@ def train(args):
                     features_y.relu2_2, features_x.relu2_2
                 )
 
-                style_loss = 0.0
-                for ft_y, gm_s in zip(features_y, gram_style):
-                    gm_y = gram_matrix(ft_y)
-                    style_loss += mse_loss(gm_y, gm_s.expand(n_batch, -1, -1))
-                style_loss *= args.style_weight
+                # Add face detection and adaptive weights
+                if FACE_DETECTION_ENABLED:
+                    face_mask = create_face_mask(x, FACE_PREDICTOR_PATH)
+                    style_weights = calculate_adaptive_weights(
+                        face_mask, args.style_weight
+                    )
+                    style_weights = torch.from_numpy(style_weights).to(device)
+                    style_loss = compute_style_loss(
+                        features_y, gram_style, style_weights, mse_loss
+                    )
+                else:
+                    style_loss = 0.0
+                    for ft_y, gm_s in zip(features_y, gram_style):
+                        gm_y = gram_matrix(ft_y)
+                        style_loss += mse_loss(gm_y, gm_s.expand(n_batch, -1, -1))
+                    style_loss *= args.style_weight
 
                 total_loss = content_loss + style_loss
                 total_loss.backward()
@@ -228,7 +242,20 @@ def stylize(args):
 
     # Generate stylized image
     with torch.no_grad():
-        output = transformer(image)
+        if FACE_DETECTION_ENABLED:
+            # Create face mask and calculate weights
+            face_mask = create_face_mask(image, FACE_PREDICTOR_PATH)
+            style_weights = calculate_adaptive_weights(face_mask, args.style_weight)
+            style_weights = torch.from_numpy(style_weights).to(device)
+
+            # Apply style transfer with adaptive weights
+            output = transformer(image)
+
+            # Save weight visualization for debugging
+            weight_vis = (style_weights.cpu().numpy() * 255).astype(np.uint8)
+            cv2.imwrite("style_weights.png", weight_vis)
+        else:
+            output = transformer(image)
 
     # Save output
     save_image(output, args.output_image)
