@@ -22,6 +22,7 @@ from plotting import (
     show_images,
     save_loss_plot,
     save_stylized_results,
+    create_training_gif,
 )
 from losses import normalize_batch, gram_matrix
 from debug_utils import debug_image_values
@@ -77,6 +78,11 @@ def train(args):
     save_training_config(args, exp_dir)
 
     style = load_image(args.style_image, size=224, force_size=True).to(device)
+    
+    # Load a test image for progress visualization
+    test_image_out = load_image(args.test_image, size=args.output_size, force_size=True).to(device)
+    if test_image_out.shape[-2:] != (1080, 1080):
+        print(f"[WARNING] Test content image is {test_image_out.shape[-2:]} but expected 1080x1080 for output. Output will be resized.")
 
     transformer = TransformerNet().to(device)
     vgg = Vgg16(requires_grad=False).to(device)
@@ -129,13 +135,10 @@ def train(args):
                 # Add face detection and adaptive weights
                 if FACE_DETECTION_ENABLED:
                     face_mask = create_face_mask(x, FACE_PREDICTOR_PATH)
-                    style_weights = calculate_adaptive_weights(
-                        face_mask, args.style_weight
-                    )
+                    style_weights = calculate_adaptive_weights(face_mask)
                     style_weights = torch.from_numpy(style_weights).to(device)
-                    style_loss = compute_style_loss(
-                        features_y, gram_style, style_weights, mse_loss
-                    )
+                    style_loss = compute_style_loss(features_y, gram_style, style_weights, mse_loss)
+                    style_loss *= args.style_weight
                 else:
                     style_loss = 0.0
                     for ft_y, gm_s in zip(features_y, gram_style):
@@ -173,6 +176,14 @@ def train(args):
                         exp_dir, "checkpoints", ckpt_model_filename
                     )
                     torch.save(transformer.state_dict(), ckpt_model_path)
+                    
+                    # Save progress image
+                    with torch.no_grad():
+                        progress_image = transformer(test_image_out)
+                        progress_filename = f"progress_epoch_{epoch}_batch_{batch_id + 1}.jpg"
+                        progress_path = os.path.join(exp_dir, "checkpoints", progress_filename)
+                        save_image(progress_image, progress_path)
+                    
                     transformer.to(device).train()
 
     transformer.eval().cpu()
@@ -182,6 +193,9 @@ def train(args):
 
     save_loss_plot(losses, exp_dir)
     save_training_summary(losses, exp_dir)
+    
+    # Create training progress GIF
+    create_training_gif(exp_dir)
 
     print(f"\nTraining completed. Results saved in {exp_dir}")
     return exp_dir

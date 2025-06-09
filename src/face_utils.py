@@ -20,7 +20,10 @@ def create_face_mask(
     """
     # Convert image to grayscale for face detection
     if isinstance(image, torch.Tensor):
-        image = image.squeeze(0).permute(1, 2, 0).cpu().numpy()
+        # Handle batched input
+        if len(image.shape) == 4:  # (B, C, H, W)
+            image = image[0]  # Take first image from batch
+        image = image.permute(1, 2, 0).cpu().numpy()
         image = (image * 255).astype(np.uint8)
 
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -50,22 +53,32 @@ def calculate_adaptive_weights(
 ) -> np.ndarray:
     """
     Calculate adaptive style weights based on distance from face regions.
+    Creates an extreme case where faces receive all the styling while the rest of the image remains largely unchanged.
 
     Args:
         face_mask: Binary mask where face regions are marked as 255
         base_style_weight: Base weight for style transfer
 
     Returns:
-        Weight map where values are higher away from face regions
+        Weight map where values are much higher in face regions and very low elsewhere
     """
     # Create distance transform from face mask
     distance_map = cv2.distanceTransform(face_mask, cv2.DIST_L2, 3)
     # Normalize distance map
     distance_map = distance_map / distance_map.max()
-    # Invert to get higher weights away from face
-    style_weights = 1 - distance_map
-    # Scale to desired range
-    style_weights = base_style_weight * (0.2 + 0.8 * style_weights)
+    
+    # Create extreme contrast by using a higher power
+    style_weights = np.power(distance_map, 4)  # Higher power for more extreme contrast
+    
+    # Scale to create very high weights for faces and very low weights elsewhere
+    style_weights = 0.01 + 0.99 * style_weights  # Most of the image gets very low weight
+    
+    # Create a sharp transition around face regions
+    face_region = (face_mask > 0).astype(np.float32)
+    style_weights = np.where(face_region > 0, 1.0, style_weights)  # Set face regions to maximum weight
+    
+    # Normalize to have mean of 1.0
+    style_weights = style_weights / style_weights.mean()
     return style_weights
 
 
@@ -89,11 +102,24 @@ def compute_style_loss(
     """
     style_loss = 0.0
     for ft_y, gm_s in zip(features_y, gram_style):
+        # Get feature dimensions
+        b, c, h, w = ft_y.shape
+        
+        # Ensure style_weights is on the same device as features
+        style_weights = style_weights.to(ft_y.device)
+        
+        # Reshape style weights to match batch size and normalize
+        style_weights = style_weights.view(b, -1).mean(dim=1)  # Average across spatial dimensions
+        style_weights = style_weights / style_weights.mean()  # Ensure mean is 1.0
+        
+        # Compute gram matrix for generated image
         gm_y = gram_matrix(ft_y)
-        # Apply style weights to the gram matrix
-        weighted_gm_y = gm_y * style_weights.view(-1, 1, 1)
-        weighted_gm_s = gm_s.expand(gm_y.size(0), -1, -1) * style_weights.view(-1, 1, 1)
-        style_loss += mse_loss(weighted_gm_y, weighted_gm_s)
+        
+        # Apply style weights to the generated gram matrix
+        weighted_gm_y = gm_y * style_weights.view(b, 1, 1)
+        
+        # Compute loss between weighted generated gram matrix and style gram matrix
+        style_loss += mse_loss(weighted_gm_y, gm_s.expand(b, -1, -1))
     return style_loss
 
 
