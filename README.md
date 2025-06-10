@@ -2,6 +2,9 @@
 
 A PyTorch implementation of fast neural style transfer with a focus on preserving facial features during the stylization process. This project combines the power of deep learning for artistic style transfer with face detection to maintain the integrity of facial features in the output images.
 
+## Presentation
+[https://docs.google.com/presentation/d/1Hhewcrc17nhbdCTBelULdSfHbmykqz37VupfpTpxryI/edit](https://docs.google.com/presentation/d/1Hhewcrc17nhbdCTBelULdSfHbmykqz37VupfpTpxryI/edit)
+
 ## Features
 
 - Fast feed-forward neural style transfer
