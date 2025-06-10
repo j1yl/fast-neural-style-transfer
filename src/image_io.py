@@ -1,5 +1,5 @@
 import torch
-from PIL import Image, ImageEnhance
+from PIL import Image
 import os
 from torchvision import transforms
 from datetime import datetime
@@ -18,15 +18,14 @@ def load_image(
 ) -> torch.Tensor:
     global _resized_count, _total_count
     _total_count += 1
-    
+
     image = Image.open(image_path)
     if image.mode != "RGBA":
         image = image.convert("RGBA")
     background = Image.new("RGBA", image.size, (255, 255, 255, 255))
     image = Image.alpha_composite(background, image)
     image = image.convert("RGB")
-    orig_size = image.size
-    
+
     if size is not None:
         if force_size and image.size != (size, size):
             _resized_count += 1
@@ -52,7 +51,7 @@ def load_image(
             )
     else:
         transform = transforms.Compose([transforms.ToTensor()])
-    
+
     image = transform(image)
     if len(image.shape) != 3:
         raise ValueError(
@@ -82,8 +81,6 @@ def save_image(tensor: torch.Tensor, output_path: str) -> None:
     img = img.numpy()
     img = img.transpose(1, 2, 0).astype("uint8")
     img = Image.fromarray(img)
-    enhancer = ImageEnhance.Color(img)
-    img = enhancer.enhance(1.2)
     img.save(output_path)
 
 

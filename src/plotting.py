@@ -2,6 +2,8 @@ import torch
 import matplotlib.pyplot as plt
 import os
 from typing import List, Optional, Dict
+import glob
+import imageio
 
 
 def show_images(images: List[torch.Tensor], titles: Optional[List[str]] = None) -> None:
@@ -32,7 +34,6 @@ def save_loss_plot(losses: Dict[str, List[float]], exp_dir: str) -> None:
     plt.figure(figsize=(10, 6))
     plt.plot(losses["content"], label="Content Loss", color="blue")
     plt.plot(losses["style"], label="Style Loss", color="red")
-    plt.plot(losses["color"], label="Color Loss", color="green", alpha=0.5)
     plt.plot(
         losses["total"], label="Total Loss", color="black", linestyle="--", alpha=0.7
     )
@@ -101,3 +102,28 @@ def plot_gram_matrices(
             fname += f"_epoch{epoch}"
         plt.savefig(os.path.join(exp_dir, "plots", "gram_matrices", f"{fname}.png"))
         plt.close()
+
+
+def create_training_gif(exp_dir: str, output_name: str = "training_progress.gif"):
+    """Create a GIF from the training progress images.
+    
+    Args:
+        exp_dir (str): Directory containing the progress images
+        output_name (str): Name of the output GIF file
+    """
+    # Get all checkpoint images
+    image_files = sorted(glob.glob(os.path.join(exp_dir, "checkpoints", "progress_*.jpg")))
+    
+    if not image_files:
+        print("No progress images found to create GIF")
+        return
+    
+    # Read images
+    images = []
+    for filename in image_files:
+        images.append(imageio.imread(filename))
+    
+    # Save as GIF
+    output_path = os.path.join(exp_dir, output_name)
+    imageio.mimsave(output_path, images, duration=0.3)  # 0.3 seconds per frame
+    print(f"Training progress GIF saved to {output_path}")

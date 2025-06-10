@@ -22,19 +22,23 @@ from plotting import (
     show_images,
     save_loss_plot,
     save_stylized_results,
+    create_training_gif,
 )
-from color_utils import preserve_color_characteristics
 from losses import normalize_batch, gram_matrix
 from debug_utils import debug_image_values
 from config import (
     CONTENT_WEIGHT,
     STYLE_WEIGHT,
-    STYLE_LAYER_WEIGHTS,
-    COLOR_WEIGHT,
-    BRIGHTNESS_WEIGHT,
-    CONTRAST_WEIGHT,
-    COLOR_MATCHING_WEIGHT,
+    FACE_DETECTION_ENABLED,
+    FACE_PREDICTOR_PATH,
 )
+from face_utils import (
+    create_face_mask,
+    calculate_adaptive_weights,
+    compute_style_loss,
+)
+import cv2
+import numpy as np
 
 
 class ImageDataset(Dataset):
@@ -74,28 +78,24 @@ def train(args):
     save_training_config(args, exp_dir)
 
     style = load_image(args.style_image, size=224, force_size=True).to(device)
+    
+    # Load a test image for progress visualization
+    test_image_out = load_image(args.test_image, size=args.output_size, force_size=True).to(device)
+    if test_image_out.shape[-2:] != (1080, 1080):
+        print(f"[WARNING] Test content image is {test_image_out.shape[-2:]} but expected 1080x1080 for output. Output will be resized.")
 
     transformer = TransformerNet().to(device)
     vgg = Vgg16(requires_grad=False).to(device)
 
-    # Original dataset loading code (commented out for comparison)
-    """
-    train_dataset = ImageDataset(args.dataset, size=224, force_size=True)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    """
-    
     # Load FFHQ dataset from local directory
     print("Loading FFHQ dataset from local directory...")
     train_dataset = ImageDataset(
         content_dir="data/ffhq",  # Path to your local FFHQ images
         size=224,
-        force_size=True
+        force_size=True,
     )
     train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=4
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4
     )
 
     optimizer = optim.Adam(transformer.parameters(), args.lr)
@@ -106,84 +106,47 @@ def train(args):
     features_style = vgg(style)
     gram_style = [gram_matrix(y) for y in features_style]
 
-    losses = {"content": [], "style": [], "color": [], "total": []}
+    losses = {"content": [], "style": [], "total": []}
 
     for epoch in range(args.epochs):
         transformer.train()
         agg_content_loss = 0.0
         agg_style_loss = 0.0
-        agg_color_loss = 0.0
         count = 0
 
         with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}") as pbar:
             for batch_id, batch in enumerate(pbar):
-                # Get images from batch tuple (image, label)
                 x, _ = batch
                 n_batch = len(x)
                 count += n_batch
                 optimizer.zero_grad()
-
                 x = x.to(device)
                 y = transformer(x)
-
-                # debug_color_values(x, "Input content image", exp_dir)
-                # debug_color_values(y, "Transformer output", exp_dir)
-
                 y = normalize_batch(y)
                 x = normalize_batch(x)
 
                 features_y = vgg(y)
                 features_x = vgg(x)
 
-                # Content loss
                 content_loss = args.content_weight * mse_loss(
                     features_y.relu2_2, features_x.relu2_2
                 )
 
-                # Style loss
-                style_loss = 0.0
-                for i, (ft_y, gm_s) in enumerate(zip(features_y, gram_style)):
-                    gm_y = gram_matrix(ft_y)
-                    layer_weight = (
-                        STYLE_LAYER_WEIGHTS[i] if i < len(STYLE_LAYER_WEIGHTS) else 1.0
-                    )
-                    style_loss += layer_weight * mse_loss(
-                        gm_y, gm_s.expand(n_batch, -1, -1)
-                    )
-                style_loss *= args.style_weight
+                # Add face detection and adaptive weights
+                if FACE_DETECTION_ENABLED:
+                    face_mask = create_face_mask(x, FACE_PREDICTOR_PATH)
+                    style_weights = calculate_adaptive_weights(face_mask)
+                    style_weights = torch.from_numpy(style_weights).to(device)
+                    style_loss = compute_style_loss(features_y, gram_style, style_weights, mse_loss)
+                    style_loss *= args.style_weight
+                else:
+                    style_loss = 0.0
+                    for ft_y, gm_s in zip(features_y, gram_style):
+                        gm_y = gram_matrix(ft_y)
+                        style_loss += mse_loss(gm_y, gm_s.expand(n_batch, -1, -1))
+                    style_loss *= args.style_weight
 
-                # Color loss
-                color_loss = (
-                    preserve_color_characteristics(
-                        x,
-                        style,
-                        y,
-                        content_weight=0.7,
-                        style_weight=0.3,
-                    )
-                    * COLOR_WEIGHT
-                )
-
-                # Brightness loss
-                brightness_loss = (
-                    torch.mean((y.mean() - x.mean()) ** 2) * BRIGHTNESS_WEIGHT
-                )
-
-                # Contrast loss
-                contrast_loss = torch.mean((y.std() - x.std()) ** 2) * CONTRAST_WEIGHT
-
-                # Color matching loss
-                color_matching_loss = torch.mean((y - x) ** 2) * COLOR_MATCHING_WEIGHT
-
-                # Total loss
-                total_loss = (
-                    content_loss
-                    + style_loss
-                    + color_loss
-                    + brightness_loss
-                    + contrast_loss
-                    + color_matching_loss
-                )
+                total_loss = content_loss + style_loss
                 total_loss.backward()
 
                 torch.nn.utils.clip_grad_norm_(transformer.parameters(), max_norm=1.0)
@@ -192,51 +155,49 @@ def train(args):
 
                 losses["content"].append(content_loss.item())
                 losses["style"].append(style_loss.item())
-                losses["color"].append(color_loss.item())
                 losses["total"].append(total_loss.item())
 
                 # Update aggregate losses
                 agg_content_loss += content_loss.item()
                 agg_style_loss += style_loss.item()
-                agg_color_loss += color_loss.item()
 
                 pbar.set_postfix(
                     {
                         "content_loss": f"{agg_content_loss / (batch_id + 1):.4f}",
                         "style_loss": f"{agg_style_loss / (batch_id + 1):.4f}",
-                        "color_loss": f"{agg_color_loss / (batch_id + 1):.4f}",
-                        "total_loss": f"{(agg_content_loss + agg_style_loss + agg_color_loss) / (batch_id + 1):.4f}",
+                        "total_loss": f"{(agg_content_loss + agg_style_loss) / (batch_id + 1):.4f}",
                     }
                 )
 
                 if (batch_id + 1) % args.checkpoint_interval == 0:
-                    transformer.eval().cpu()
+                    # Save checkpoint
+                    transformer.eval()
                     ckpt_model_filename = f"ckpt_epoch_{epoch}_batch_{batch_id + 1}.pth"
                     ckpt_model_path = os.path.join(
                         exp_dir, "checkpoints", ckpt_model_filename
                     )
                     torch.save(transformer.state_dict(), ckpt_model_path)
+                    
+                    # Save progress image
+                    with torch.no_grad():
+                        progress_image = transformer(test_image_out)
+                        progress_filename = f"progress_epoch_{epoch}_batch_{batch_id + 1}.jpg"
+                        progress_path = os.path.join(exp_dir, "checkpoints", progress_filename)
+                        save_image(progress_image, progress_path)
+                    
+                    # Move model back to device and set to train mode
                     transformer.to(device).train()
 
-        # After each epoch, plot Gram matrices for style and a sample generated image
-        # with torch.no_grad():
-        #     sample_content = x[0:1].to(device)
-        #     sample_generated = transformer(sample_content)
-        #     sample_generated_norm = normalize_batch(sample_generated)
-        #     features_sample = vgg(sample_generated_norm)
-        #     gram_generated = [gram_matrix(y) for y in features_sample]
-        #     plot_gram_matrices(gram_style, gram_generated, exp_dir, epoch=epoch + 1)
-        #     log_gram_matrix_stats(gram_style, gram_generated, exp_dir, epoch=epoch + 1)
-
-    # Save final model
     transformer.eval().cpu()
-    save_model_filename = f"final_model.pth"
+    save_model_filename = "final_model.pth"
     save_model_path = os.path.join(exp_dir, "checkpoints", save_model_filename)
     torch.save(transformer.state_dict(), save_model_path)
 
-    # Save training results
     save_loss_plot(losses, exp_dir)
     save_training_summary(losses, exp_dir)
+    
+    # Create training progress GIF
+    create_training_gif(exp_dir)
 
     print(f"\nTraining completed. Results saved in {exp_dir}")
     return exp_dir
@@ -297,7 +258,20 @@ def stylize(args):
 
     # Generate stylized image
     with torch.no_grad():
-        output = transformer(image)
+        if FACE_DETECTION_ENABLED:
+            # Create face mask and calculate weights
+            face_mask = create_face_mask(image, FACE_PREDICTOR_PATH)
+            style_weights = calculate_adaptive_weights(face_mask, args.style_weight)
+            style_weights = torch.from_numpy(style_weights).to(device)
+
+            # Apply style transfer with adaptive weights
+            output = transformer(image)
+
+            # Save weight visualization for debugging
+            weight_vis = (style_weights.cpu().numpy() * 255).astype(np.uint8)
+            cv2.imwrite("style_weights.png", weight_vis)
+        else:
+            output = transformer(image)
 
     # Save output
     save_image(output, args.output_image)
