@@ -8,3 +8,6 @@ data
 *.pyz
 fast_neural_style_inspiration_only
 experiments
+shape_predictor_68_face_landmarks.dat
+*.png
+*.jpg

@@ -11,7 +11,7 @@ from plotting import create_training_gif
 # CONTENT_IMAGE = input("Enter the path to the input :")
 # STYLE_IMAGE = input("Enter the path to the style image:")
 CONTENT_IMAGE = "data/headshot3.jpg"
-STYLE_IMAGE = "data/style/picasso1.jpg"
+STYLE_IMAGE = "data/style/starry.jpg"
 
 DEFAULTS = {
     "dataset": "data/ffhq",

@@ -170,7 +170,8 @@ def train(args):
                 )
 
                 if (batch_id + 1) % args.checkpoint_interval == 0:
-                    transformer.eval().cpu()
+                    # Save checkpoint
+                    transformer.eval()
                     ckpt_model_filename = f"ckpt_epoch_{epoch}_batch_{batch_id + 1}.pth"
                     ckpt_model_path = os.path.join(
                         exp_dir, "checkpoints", ckpt_model_filename
@@ -184,6 +185,7 @@ def train(args):
                         progress_path = os.path.join(exp_dir, "checkpoints", progress_filename)
                         save_image(progress_image, progress_path)
                     
+                    # Move model back to device and set to train mode
                     transformer.to(device).train()
 
     transformer.eval().cpu()
